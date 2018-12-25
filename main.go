@@ -17,7 +17,7 @@ type Params struct {
 type requestSelectAuth struct {
 	Ver      int
 	NMethods int
-	Methods  int
+	Methods  []int
 }
 
 type responseSelectAuth struct {
@@ -126,10 +126,10 @@ func handleClientRequest(client net.Conn) {
 	//socks5-proxy protocol
 	//first byte is 0x05 fixed
 	if first == socks5Ver {
-
 		//interactive
 		selectAuth := requestSelectAuthMethod(client)
 		responseSelectAuthMethod(client, selectAuth)
+
 		clientRequest := requestAuth(client)
 		responseAuth(client, clientRequest)
 
@@ -148,29 +148,23 @@ func handleClientRequest(client net.Conn) {
 }
 
 func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
-
 	ver      := socks5Ver
-	nmethods := int(ReadMustInt8(client))
-	methods  := int(ReadMustInt8(client))
-
-	request := requestSelectAuth {
+	nMethods := int(ReadMustInt8(client))
+	for i:=0; i < nMethods; i++ {
+		ReadMustInt8(client)
+	}
+	request  := requestSelectAuth {
 		Ver     :ver,
-		NMethods:nmethods,
-		Methods :methods,
+		NMethods:nMethods,
 	}
 
 	return request
 }
 
 func responseSelectAuthMethod(client net.Conn, requset requestSelectAuth) {
-	auth := requestSelectAuth {
-		Ver:socks5Ver,
-		Methods:methodNoAuthenticationRequired,
-	}
-
 	client.Write([]byte{
-		byte(auth.Ver),
-		byte(auth.Methods),
+		byte(requset.Ver),
+		byte(methodNoAuthenticationRequired),
 	})
 }
 
