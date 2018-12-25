@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
 	"strconv"
 )
 
@@ -230,7 +229,6 @@ func ReadMustIPv4(r io.Reader) string {
 	if n != 4 || err != nil {
 		panic("ReadMustIPv4 error")
 	}
-	os.Exit(1)
 	return net.IPv4(byt[0], byt[1], byt[2], byt[3]).String()
 }
 
