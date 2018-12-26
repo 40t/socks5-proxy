@@ -15,3 +15,8 @@ USAGE
 ```
 $ socks5-proxy -p [port]
 ```
+
+DEMO
+----
+
+![image](https://github.com/40t/socks5-proxy/raw/master/README.jpg)
