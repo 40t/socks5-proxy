@@ -8,10 +8,12 @@ import (
 	"log"
 	"net"
 	"strconv"
+	"strings"
 )
 
 type Params struct {
 	port int
+	account string
 }
 
 type requestSelectAuth struct {
@@ -22,7 +24,20 @@ type requestSelectAuth struct {
 
 type responseSelectAuth struct {
 	Ver      int
-	Methods  int
+	Method   int
+}
+
+type reqAuth struct {
+	Ver      int
+	ULen     int
+	UName    string
+	PLen     int
+	Passwd   string
+}
+
+type respAuth struct {
+	Ver      int
+	status   int
 }
 
 type clientRequest struct {
@@ -46,6 +61,7 @@ const (
 
 	socks5Ver                        = 0x05
 	methodNoAuthenticationRequired   = 0x00
+	usernamePassword                 = 0x02
 	cmdConnect                       = 0x01
 	cmdBind                          = 0x02
 	cmdUdpAssociate                  = 0x03
@@ -63,6 +79,10 @@ const (
 	repCommandNotSupported           = 0x07
 	repAddressTypeNotSupported       = 0x08
 	repUnassigned                    = 0x09
+	serverResponseStatusOk           = 0x00
+	serverResponseStatusFalse        = 0x01
+	respAuthFail                     = 0x01
+	respAuthSuccess                  = 0x00
 )
 
 func main() {
@@ -72,7 +92,8 @@ func main() {
 
 func getParams() Params {
 
-	fp    := flag.Int("p", 0, "port [默认端口:9999]")
+	fp  := flag.Int("p", 0, "port [默认端口:9999]")
+	fup := flag.String("a", "", "a [username:password]")
 	flag.Parse()
 
 	var port = 9999
@@ -82,6 +103,7 @@ func getParams() Params {
 
 	return Params{
 		port:port,
+		account:*fup,
 	}
 }
 
@@ -106,11 +128,11 @@ func dispatch(params Params) {
 		msg := fmt.Sprintf(newClient, client.RemoteAddr())
 		fmt.Println(msg)
 
-		go handleClientRequest(client)
+		go handleClientRequest(client, params)
 	}
 }
 
-func handleClientRequest(client net.Conn) {
+func handleClientRequest(client net.Conn, params Params) {
 
 	if client == nil {
 		return
@@ -126,12 +148,22 @@ func handleClientRequest(client net.Conn) {
 	//socks5-proxy protocol
 	//first byte is 0x05 fixed
 	if first == socks5Ver {
-		//interactive
-		selectAuth := requestSelectAuthMethod(client)
-		responseSelectAuthMethod(client, selectAuth)
 
-		clientRequest := requestAuth(client)
-		responseAuth(client, clientRequest)
+		//coordination
+		selectAuth := requestSelectAuthMethod(client)
+		responseSelectAuthMethod(client, selectAuth, params)
+
+		//auth
+		if len(params.account) != 0 {
+			request := requestAuth(client)
+			if !responseAuth(client, request, params) {
+				return
+			}
+		}
+
+		//data transfer
+		clientRequest := requestData(client)
+		responseData(client, clientRequest)
 
 		//server request
 		server, err := net.Dial("tcp", net.JoinHostPort(clientRequest.addr, strconv.Itoa(clientRequest.port)))
@@ -145,6 +177,47 @@ func handleClientRequest(client net.Conn) {
 		go io.Copy(server, client)
 		io.Copy(client, server)
 	}
+}
+
+func requestAuth(client net.Conn) reqAuth {
+	ver   := ReadMustByte(client)
+	_ = ver
+	ulen  := int(ReadMustInt8(client))
+	uname := ReadStringByLen(client, ulen)
+	plen  := int(ReadMustInt8(client))
+	passwd:= ReadStringByLen(client, plen)
+
+	request  := reqAuth {
+		Ver: socks5Ver,
+		ULen:ulen,
+		UName:uname,
+		PLen:plen,
+		Passwd:passwd,
+	}
+
+	return request
+}
+
+func responseAuth(client net.Conn, auth reqAuth, params Params) bool {
+	account := auth.UName+":"+auth.Passwd
+	resp := respAuth{
+		Ver:socks5Ver,
+		status:respAuthSuccess,
+	}
+	if strings.Compare(account, params.account) != 0 {
+		resp.status = respAuthFail
+		client.Write([]byte{
+			byte(resp.Ver),
+			byte(resp.status),
+		})
+		return false
+	}
+
+	client.Write([]byte{
+		byte(resp.Ver),
+		byte(resp.status),
+	})
+	return true
 }
 
 func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
@@ -161,14 +234,20 @@ func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
 	return request
 }
 
-func responseSelectAuthMethod(client net.Conn, requset requestSelectAuth) {
+func responseSelectAuthMethod(client net.Conn, requset requestSelectAuth, params Params) {
+
+	//need username and password
+	auth := methodNoAuthenticationRequired
+	if len(params.account) != 0 {
+		auth = usernamePassword
+	}
 	client.Write([]byte{
 		byte(requset.Ver),
-		byte(methodNoAuthenticationRequired),
+		byte(auth),
 	})
 }
 
-func requestAuth(client net.Conn) clientRequest {
+func requestData(client net.Conn) clientRequest {
 
 	ver := int(ReadMustInt8(client))
 	cmd := ReadMustByte(client)
@@ -189,7 +268,7 @@ func requestAuth(client net.Conn) clientRequest {
 	return request
 }
 
-func responseAuth(client net.Conn, request clientRequest) {
+func responseData(client net.Conn, request clientRequest) {
 	client.Write([]byte{
 		socks5Ver,
 		repSuccessed,
@@ -258,6 +337,20 @@ func ReadString(r io.Reader) string {
 	}
 	return string(result)
 }
+
+func ReadStringByLen(r io.Reader, l int) string {
+	var result []byte
+	var b = make([]byte, 1)
+	for i := 0; i < l; i++ {
+		_, err := r.Read(b)
+		if err != nil {
+			panic(err)
+		}
+		result = append(result, b[0])
+	}
+	return string(result)
+}
+
 
 func ReadInt16(r io.Reader) (n int16) {
 	binary.Read(r, binary.BigEndian, &n)
