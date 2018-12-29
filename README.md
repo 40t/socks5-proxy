@@ -13,7 +13,8 @@ USAGE
 -----
 
 ```
-$ socks5-proxy -p [port]
+$ socks5-proxy -p [port] -a [username:password]
+$ socks5-proxy  //default port is 9999
 ```
 
 DEMO
