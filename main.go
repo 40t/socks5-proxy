@@ -153,6 +153,10 @@ func handleClientRequest(client net.Conn, params Params) {
 		selectAuth := requestSelectAuthMethod(client)
 		responseSelectAuthMethod(client, selectAuth, params)
 
+		if _, err := ReadOneByte(client); err == io.EOF {
+			return
+		}
+
 		//auth
 		if len(params.account) != 0 {
 			request := requestAuth(client)
