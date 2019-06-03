@@ -153,10 +153,6 @@ func handleClientRequest(client net.Conn, params Params) {
 		selectAuth := requestSelectAuthMethod(client)
 		responseSelectAuthMethod(client, selectAuth, params)
 
-		if _, err := ReadOneByte(client); err == io.EOF {
-			return
-		}
-
 		//auth
 		if len(params.account) != 0 {
 			request := requestAuth(client)
@@ -230,6 +226,10 @@ func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
 	for i:=0; i < nMethods; i++ {
 		ReadMustInt8(client)
 	}
+
+	//EOF
+	ReadMustInt8(client)
+
 	request  := requestSelectAuth {
 		Ver     :ver,
 		NMethods:nMethods,
@@ -259,6 +259,9 @@ func requestData(client net.Conn) clientRequest {
 	atyp:= ReadMustByte(client)
 	addr:= ReadMustAddr(client, atyp)
 	port:= ReadMustPort(client)
+
+	//EOF
+	ReadOneByte(client)
 
 	request := clientRequest {
 		Ver:ver,
