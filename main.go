@@ -228,7 +228,7 @@ func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
 	}
 
 	//EOF
-	ReadMustInt8(client)
+	ReadOneByte(client)
 
 	request  := requestSelectAuth {
 		Ver     :ver,
