@@ -133,58 +133,53 @@ func dispatch(params Params) {
 }
 
 func handleClientRequest(client net.Conn, params Params) {
-
-	if client == nil {
-		return
-	}
 	defer client.Close()
 
-	//read fist byte
-	first, _ := ReadOneByte(client)
-	if first == 0x00 {
+	//Read the version byte
+	if version, err := ReadVer(client); err != nil && version != socks5Ver {
 		return
 	}
 
-	//socks5-proxy protocol
-	//first byte is 0x05 fixed
-	if first == socks5Ver {
+	//Coordination
+	selectAuth := requestSelectAuthMethod(client)
+	responseSelectAuthMethod(client, selectAuth, params)
 
-		//coordination
-		selectAuth := requestSelectAuthMethod(client)
-		responseSelectAuthMethod(client, selectAuth, params)
-
-		//auth
-		if len(params.account) != 0 {
-			request := requestAuth(client)
-			if !responseAuth(client, request, params) {
-				return
-			}
-		}
-
-		//data transfer
-		clientRequest := requestData(client)
-		responseData(client, clientRequest)
-
-		//server request
-		server, err := net.Dial("tcp", net.JoinHostPort(clientRequest.addr, strconv.Itoa(clientRequest.port)))
-		if err != nil {
-			log.Println(err)
+	//auth
+	if len(params.account) != 0 {
+		request := requestAuth(client)
+		if !responseAuth(client, request, params) {
 			return
 		}
-		defer server.Close()
-
-		//proxy data
-		go io.Copy(server, client)
-		io.Copy(client, server)
 	}
+
+	//data transfer
+	clientRequest, err := requestData(client);
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	responseData(client, clientRequest)
+
+	//server request
+	server, err := net.Dial("tcp", net.JoinHostPort(clientRequest.addr, strconv.Itoa(clientRequest.port)))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer server.Close()
+
+	//proxy data
+	go io.Copy(server, client)
+	io.Copy(client, server)
+
 }
 
 func requestAuth(client net.Conn) reqAuth {
 	ver   := ReadMustByte(client)
 	_ = ver
-	ulen  := int(ReadMustInt8(client))
+	ulen  := int(ReadInt8(client))
 	uname := ReadStringByLen(client, ulen)
-	plen  := int(ReadMustInt8(client))
+	plen  := int(ReadInt8(client))
 	passwd:= ReadStringByLen(client, plen)
 
 	request  := reqAuth {
@@ -222,9 +217,9 @@ func responseAuth(client net.Conn, auth reqAuth, params Params) bool {
 
 func requestSelectAuthMethod(client net.Conn) requestSelectAuth {
 	ver      := socks5Ver
-	nMethods := int(ReadMustInt8(client))
+	nMethods := int(ReadInt8(client))
 	for i:=0; i < nMethods; i++ {
-		ReadMustInt8(client)
+		ReadInt8(client)
 	}
 	request  := requestSelectAuth {
 		Ver     :ver,
@@ -247,9 +242,12 @@ func responseSelectAuthMethod(client net.Conn, requset requestSelectAuth, params
 	})
 }
 
-func requestData(client net.Conn) clientRequest {
+func requestData(client net.Conn) (cr clientRequest, err error) {
 
-	ver := int(ReadMustInt8(client))
+	ver, err := ReadVer(client)
+	if err != nil {
+		return cr, err
+	}
 	cmd := ReadMustByte(client)
 	rsv := ReadMustByte(client)
 	atyp:= ReadMustByte(client)
@@ -265,7 +263,7 @@ func requestData(client net.Conn) clientRequest {
 		port:port,
 	}
 
-	return request
+	return request, nil
 }
 
 func responseData(client net.Conn, request clientRequest) {
@@ -327,7 +325,7 @@ func ReadMustPort(r io.Reader) int {
 func ReadString(r io.Reader) string {
 	var result []byte
 	var b = make([]byte, 1)
-	l := int(ReadMustInt8(r))
+	l := int(ReadInt8(r))
 	for i := 0; i < l; i++ {
 		_, err := r.Read(b)
 		if err != nil {
@@ -357,6 +355,11 @@ func ReadInt16(r io.Reader) (n int16) {
 	return
 }
 
+func ReadInt8(r io.Reader) (n int8) {
+	binary.Read(r, binary.BigEndian, &n)
+	return
+}
+
 func ReadOneByte(r io.Reader) (byte, error) {
 	var one [1]byte
 	_, err := r.Read(one[:])
@@ -382,11 +385,8 @@ func ReadMustByte(r io.Reader) byte {
 	return one[0]
 }
 
-func ReadMustInt8(r io.Reader) (n int8) {
-	err := binary.Read(r, binary.LittleEndian, &n)
-	if err != nil {
-		panic(err)
-	}
-
-	return n
+func ReadVer(r io.Reader) (v int, err error) {
+	var n int8
+	err = binary.Read(r, binary.LittleEndian, &n)
+	return int(v), err
 }
