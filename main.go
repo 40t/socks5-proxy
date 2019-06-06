@@ -57,7 +57,6 @@ type serverResponse struct{
 
 const (
 	running = "port: [%s], Socks5 proxy running... "
-	newClient = "new client: [%s]"
 
 	socks5Ver                        = 0x05
 	methodNoAuthenticationRequired   = 0x00
@@ -125,9 +124,6 @@ func dispatch(params Params) {
 			log.Panic(err)
 		}
 
-		msg := fmt.Sprintf(newClient, client.RemoteAddr())
-		fmt.Println(msg)
-
 		go handleClientRequest(client, params)
 	}
 }
@@ -168,10 +164,16 @@ func handleClientRequest(client net.Conn, params Params) {
 	}
 	defer server.Close()
 
-	//proxy data
-	go io.Copy(server, client)
-	io.Copy(client, server)
-
+	//start proxy
+	errCh := make(chan error, 2)
+	go proxy(server, client, errCh)
+	go proxy(client, server, errCh)
+	for i := 0; i < 2; i++ {
+		e := <-errCh
+		if e != nil {
+			return
+		}
+	}
 }
 
 func requestAuth(client net.Conn) reqAuth {
@@ -360,21 +362,6 @@ func ReadInt8(r io.Reader) (n int8) {
 	return
 }
 
-func ReadOneByte(r io.Reader) (byte, error) {
-	var one [1]byte
-	_, err := r.Read(one[:])
-
-	if len(one) == 0 {
-		return 0x00, nil
-	}
-
-	if err != nil || err == io.EOF || len(one) == 0 {
-		return 0x00, err
-	}
-
-	return one[0], err
-}
-
 func ReadMustByte(r io.Reader) byte {
 	var one [1]byte
 	_, err := r.Read(one[:])
@@ -390,3 +377,10 @@ func ReadVer(r io.Reader) (v int, err error) {
 	err = binary.Read(r, binary.LittleEndian, &n)
 	return int(v), err
 }
+
+func proxy(dst net.Conn, src net.Conn, errCh chan error) {
+	io.Copy(dst, src)
+	err := dst.Close()
+	errCh <- err
+}
+
